@@ -281,6 +281,7 @@
 const BASE  = '/api/proxy';
 const WF_ID = 'f920956c-aaf1-485b-ac18-0095244e4e47';
 const HDRS  = { 'Content-Type': 'application/json' };
+const ASYNC_HDRS = { ...HDRS, 'X-Execution-Mode': 'async' };
 
 let S = { resumeUrl: null, executionId: null, candidates: [], selectedId: null };
 let warmSearchPathPromise = null;
@@ -330,39 +331,16 @@ async function doSearch() {
 
   try {
     await waitForPrewarm();
-    const res  = await fetch(`${BASE}/api/workflows/${WF_ID}/execute`, { method:'POST', headers:HDRS, body:JSON.stringify({ name }) });
+    const res  = await fetch(`${BASE}/api/workflows/${WF_ID}/execute`, { method:'POST', headers:ASYNC_HDRS, body:JSON.stringify({ name }) });
     const raw  = await res.json();
 
     if (!res.ok) { goTo('p1'); showErr(raw?.message || raw?.error || `Error ${res.status} — please try again.`); return; }
 
-    const data = unwrapWorkflow(raw);
-
-    // Not found — CustomerExists else branch fired
-    if (data?.found === false || ['no_match','insufficient_input','none'].includes(data?.status)) {
-      document.getElementById('notFoundMsg').textContent = data?.message || `No customer named "${name}" was found in Shopify. Please check the spelling and try again.`;
-      goTo('p1b');
-      return;
-    }
-
-    // Paused at SelectCustomer HITL block
-    if (data?._resume?.apiUrl) {
-      S.resumeUrl   = BASE + '/' + data._resume.apiUrl.replace('https://steelengine.com/', '');
-      S.executionId = data._resume.executionId;
-      const field   = (data.inputFormat || []).find(f => f.name === 'matching_customers');
-      S.candidates  = parseCandidates(field?.value || '');
-      renderCandidates(S.candidates);
-      goTo('p2');
-      return;
-    }
-
-    // Completed immediately (single match, no HITL needed)
-    if (data?.found === true && data?.customer) {
-      renderSummary(data);
-      return;
-    }
-
-    goTo('p1');
-    showErr('Unexpected response from the workflow. Please try again.');
+    const data = raw?.async
+      ? await poll(raw.jobId || raw.executionId, 0)
+      : unwrapWorkflow(raw);
+    if (!data) { goTo('p1'); showErr('Timed out waiting for results. Please try again.'); return; }
+    handleSearchResult(data, name);
   } catch (e) {
     goTo('p1');
     showErr('Network error — could not reach the API: ' + e.message);
@@ -370,6 +348,35 @@ async function doSearch() {
     btn.disabled = false;
     btn.innerHTML = icon('search') + ' Search';
   }
+}
+
+function handleSearchResult(data, name) {
+  // Not found — CustomerExists else branch fired
+  if (data?.found === false || ['no_match','insufficient_input','none'].includes(data?.status)) {
+    document.getElementById('notFoundMsg').textContent = data?.message || `No customer named "${name}" was found in Shopify. Please check the spelling and try again.`;
+    goTo('p1b');
+    return;
+  }
+
+  // Paused at SelectCustomer HITL block
+  if (data?._resume?.apiUrl) {
+    S.resumeUrl   = BASE + '/' + data._resume.apiUrl.replace('https://steelengine.com/', '');
+    S.executionId = data._resume.executionId;
+    const field   = (data.inputFormat || []).find(f => f.name === 'matching_customers');
+    S.candidates  = parseCandidates(field?.value || '');
+    renderCandidates(S.candidates);
+    goTo('p2');
+    return;
+  }
+
+  // Completed immediately (single match, no HITL needed)
+  if (data?.found === true && data?.customer) {
+    renderSummary(data);
+    return;
+  }
+
+  goTo('p1');
+  showErr('Unexpected response from the workflow. Please try again.');
 }
 
 function parseCandidates(text) {
@@ -444,7 +451,8 @@ async function poll(execId, n) {
     const res = await fetch(`${BASE}/api/jobs/${execId}`, { headers: HDRS });
     const raw = await res.json();
     const d   = unwrapWorkflow(raw);
-    const st  = d?.status || d?.execution?.status;
+    if (d?._resume?.apiUrl || d?.found !== undefined || d?.customer) return d;
+    const st  = raw?.status || raw?.execution?.status || d?.status;
     if (st === 'completed' || st === 'success') return d?.output ?? d?.execution?.output ?? d?.result ?? d;
     if (st === 'failed' || st === 'error') return null;
     return poll(execId, n + 1);

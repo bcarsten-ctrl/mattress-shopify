@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/proxy/api/workflows/f920956c-aaf1-485b-ac18-0095244e4e47",
+      "path": "/api/warmup",
       "schedule": "*/5 * * * *"
     }
   ],
