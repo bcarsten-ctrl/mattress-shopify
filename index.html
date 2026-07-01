@@ -308,6 +308,13 @@ function prewarmSearchPath() {
   return warmSearchPathPromise;
 }
 
+async function waitForPrewarm(ms = 1200) {
+  await Promise.race([
+    prewarmSearchPath(),
+    new Promise(resolve => setTimeout(resolve, ms))
+  ]);
+}
+
 prewarmSearchPath();
 document.getElementById('nameInput')?.addEventListener('focus', prewarmSearchPath, { once: true });
 document.getElementById('nameInput')?.addEventListener('input', prewarmSearchPath, { once: true });
@@ -322,6 +329,7 @@ async function doSearch() {
   btn.innerHTML = '<div style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.75s linear infinite;flex-shrink:0"></div> Searching…';
 
   try {
+    await waitForPrewarm();
     const res  = await fetch(`${BASE}/api/workflows/${WF_ID}/execute`, { method:'POST', headers:HDRS, body:JSON.stringify({ name }) });
     const raw  = await res.json();
 
