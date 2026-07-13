@@ -23,6 +23,15 @@ test('the browser and warmup endpoint target the Lobster Mattress workflow', asy
   assert.match(warmup, /process\.env\.STEELENGINE_WORKFLOW_ID/);
 });
 
+test('Vercel configuration remains compatible with the Hobby plan', async () => {
+  const config = JSON.parse(await readRepoFile('vercel.json'));
+
+  assert.equal(config.crons, undefined, 'Hobby deployments must not include the five-minute warmup cron');
+  assert.deepEqual(config.rewrites, [
+    { source: '/api/proxy/:path*', destination: '/api/proxy?path=:path*' },
+  ]);
+});
+
 test('server-side SteelEngine calls default to dev and support an environment override', async () => {
   const [proxy, warmup] = await Promise.all([
     readRepoFile('api/proxy.js'),
