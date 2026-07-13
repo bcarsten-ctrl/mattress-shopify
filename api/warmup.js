@@ -1,4 +1,5 @@
-const WF_ID = 'f920956c-aaf1-485b-ac18-0095244e4e47';
+const WF_ID = process.env.STEELENGINE_WORKFLOW_ID || 'dbb28203-b201-4f61-a3bc-57d55a40f7b6';
+const STEELENGINE_BASE_URL = (process.env.STEELENGINE_BASE_URL || 'https://dev.steelengine.com').replace(/\/+$/, '');
 
 export default async function handler(req, res) {
   if (!process.env.STEELENGINE_API_KEY) {
@@ -7,7 +8,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(`https://steelengine.com/api/workflows/${WF_ID}/execute`, {
+    const response = await fetch(`${STEELENGINE_BASE_URL}/api/workflows/${WF_ID}/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

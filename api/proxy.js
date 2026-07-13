@@ -1,3 +1,5 @@
+const STEELENGINE_BASE_URL = (process.env.STEELENGINE_BASE_URL || 'https://dev.steelengine.com').replace(/\/+$/, '');
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -19,7 +21,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const url = `https://steelengine.com/${Array.isArray(path) ? path.join('/') : path}`;
+  const url = `${STEELENGINE_BASE_URL}/${Array.isArray(path) ? path.join('/') : path}`;
 
   try {
     const headers = {

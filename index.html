@@ -279,7 +279,7 @@
 
 <script>
 const BASE  = '/api/proxy';
-const WF_ID = 'f920956c-aaf1-485b-ac18-0095244e4e47';
+const WF_ID = 'dbb28203-b201-4f61-a3bc-57d55a40f7b6';
 const HDRS  = { 'Content-Type': 'application/json' };
 const ASYNC_HDRS = { ...HDRS, 'X-Execution-Mode': 'async' };
 
@@ -421,7 +421,8 @@ function handleSearchResult(data, name) {
 
   // Paused at SelectCustomer HITL block
   if (data?._resume?.apiUrl) {
-    S.resumeUrl   = BASE + '/' + data._resume.apiUrl.replace('https://steelengine.com/', '');
+    const resumeUrl = new URL(data._resume.apiUrl);
+    S.resumeUrl   = `${BASE}${resumeUrl.pathname}${resumeUrl.search}`;
     S.executionId = data._resume.executionId;
     const field   = (data.inputFormat || []).find(f => f.name === 'matching_customers');
     S.candidates  = parseCandidates(field?.value || '');
