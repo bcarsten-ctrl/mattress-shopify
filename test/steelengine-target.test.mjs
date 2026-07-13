@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const TARGET_WORKFLOW_ID = 'dbb28203-b201-4f61-a3bc-57d55a40f7b6';
 const OLD_WORKFLOW_ID = 'f920956c-aaf1-485b-ac18-0095244e4e47';
@@ -43,4 +44,45 @@ test('server-side SteelEngine calls default to dev and support an environment ov
     assert.match(source, /process\.env\.STEELENGINE_BASE_URL/);
     assert.doesNotMatch(source, /https:\/\/steelengine\.com\//);
   }
+});
+
+test('HITL confirmation polls the async resume job instead of the paused execution', async () => {
+  const index = await readRepoFile('index.html');
+  const start = index.indexOf('async function doConfirm()');
+  const end = index.indexOf('async function poll(', start);
+  const doConfirmSource = index.slice(start, end);
+
+  assert.notEqual(start, -1, 'doConfirm must exist');
+  assert.notEqual(end, -1, 'poll must follow doConfirm');
+
+  const polledJobIds = [];
+  let renderedResult = null;
+  const context = {
+    S: {
+      resumeUrl: '/api/proxy/resume',
+      executionId: 'paused-execution',
+      candidates: [{ id: 'customer-1', name: 'Test Customer' }],
+      selectedId: 'customer-1',
+    },
+    HDRS: { 'Content-Type': 'application/json' },
+    fetch: async () => ({
+      ok: true,
+      status: 202,
+      json: async () => ({ async: true, jobId: 'resume-job' }),
+    }),
+    unwrapWorkflow: (raw) => raw?.output?.data ?? raw?.data ?? raw,
+    poll: async (jobId) => {
+      polledJobIds.push(jobId);
+      return { found: true, customer: { id: 'redacted' } };
+    },
+    renderSummary: (result) => { renderedResult = result; },
+    startLoading: () => {},
+    goTo: () => {},
+    showErr: (message) => { throw new Error(message); },
+  };
+
+  await vm.runInNewContext(`${doConfirmSource}; doConfirm();`, context);
+
+  assert.deepEqual(polledJobIds, ['resume-job']);
+  assert.equal(renderedResult?.found, true);
 });

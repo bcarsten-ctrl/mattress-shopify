@@ -492,13 +492,20 @@ async function doConfirm() {
     const raw = await res.json();
     if (!res.ok) { goTo('p1'); showErr(raw?.message || `Resume error ${res.status}`); return; }
 
-    const resumed = unwrapWorkflow(raw);
-    if (resumed?.found === true || resumed?.customer) {
-      renderSummary(resumed);
+    const immediate = unwrapWorkflow(raw);
+    if (immediate?.found === true || immediate?.customer) {
+      renderSummary(immediate);
       return;
     }
 
-    const result = await poll(S.executionId, 0);
+    const resumeJobId = raw?.jobId || (raw?.async ? raw?.executionId : null);
+    if (!resumeJobId) {
+      goTo('p1');
+      showErr('Resume was accepted, but no completion job was returned. Please try again.');
+      return;
+    }
+
+    const result = await poll(resumeJobId, 0);
     if (result) renderSummary(result);
     else { goTo('p1'); showErr('Timed out waiting for results. Please try again.'); }
   } catch (e) {
