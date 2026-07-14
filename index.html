@@ -321,10 +321,6 @@ function serviceKey(title) {
   return (title || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function serviceDescription(title, fallback) {
-  return SERVICE_DESCRIPTIONS[serviceKey(title)] || fallback || 'Customer service coverage attached to this mattress purchase.';
-}
-
 function isServiceTitle(title) {
   const key = serviceKey(title);
   return SERVICE_DESCRIPTIONS[key] || SERVICE_WORDS.some(w => key.includes(w));
@@ -334,17 +330,25 @@ function isServiceLineItem(item) {
   return isServiceTitle(item?.title || item?.name || item?.product_title || '');
 }
 
+// Status-aware date line from the customer_services columns
+// (requested_at / scheduled_for / completed_at). There is no expires_at.
+function serviceDateLine(s) {
+  const st = (s.status || '').toString().toLowerCase();
+  if (st === 'completed' && s.completed_at) return 'Completed ' + fmt(s.completed_at);
+  if (s.scheduled_for) return 'Scheduled ' + fmt(s.scheduled_for);
+  if (s.requested_at) return 'Requested ' + fmt(s.requested_at);
+  return '';
+}
+
 function normalizeServices(rawServices) {
   const seen = new Set();
   return rawServices.map(r => r.data || r).filter(Boolean).filter(s => {
-    const key = [s.order_id || '', serviceKey(s.service_type), s.purchased_at || ''].join('|');
+    // order_id is the unique key on customer_services; fall back for safety.
+    const key = s.order_id || [serviceKey(s.service_type), s.requested_at || ''].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).map(s => ({
-    ...s,
-    notes: serviceDescription(s.service_type, s.notes)
-  }));
+  });
 }
 
 function productItems(order) {
@@ -605,8 +609,8 @@ function renderSummary(d) {
 
     ${services.length ? `<div class="section"><div class="sec-head">${icon('verified_user', 16)} Active services</div>
       <div class="sec-body">${services.map(s => `<div class="row">
-        <div class="row-left"><div style="font-weight:600;font-size:13px">${s.service_type||'Service'}</div><div style="font-size:12px;color:var(--text2)">${s.notes||''}</div></div>
-        <div class="row-right"><span class="badge green">${s.status||'active'}</span><div style="font-size:11px;color:var(--text2);margin-top:3px">Exp. ${fmt(s.expires_at)}</div></div>
+        <div class="row-left"><div style="font-weight:600;font-size:13px">${s.service_type||'Service'}</div><div style="font-size:12px;color:var(--text2)">${s.mattress_model||''}</div></div>
+        <div class="row-right"><span class="badge green">${s.status||'active'}</span><div style="font-size:11px;color:var(--text2);margin-top:3px">${serviceDateLine(s)}</div></div>
       </div>`).join('')}</div></div>` : ''}`;
 
   goTo('p4');
