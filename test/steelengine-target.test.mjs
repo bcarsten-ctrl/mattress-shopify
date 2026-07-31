@@ -9,19 +9,13 @@ const TARGET_BASE_URL = 'https://dev.steelengine.com';
 
 const readRepoFile = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('the browser and warmup endpoint target the Lobster Mattress workflow', async () => {
-  const [index, warmup] = await Promise.all([
-    readRepoFile('index.html'),
-    readRepoFile('api/warmup.js'),
-  ]);
+test('the browser targets the Lobster Mattress workflow', async () => {
+  const index = await readRepoFile('index.html');
 
   assert.equal(index.includes(TARGET_WORKFLOW_ID), true, 'index.html must use the Lobster workflow ID');
-  assert.equal(warmup.includes(TARGET_WORKFLOW_ID), true, 'warmup must use the Lobster workflow ID');
   assert.equal(index.includes(OLD_WORKFLOW_ID), false, 'index.html must not retain the old workflow ID');
-  assert.equal(warmup.includes(OLD_WORKFLOW_ID), false, 'warmup must not retain the old workflow ID');
   assert.equal(index.includes('https://steelengine.com/'), false, 'resume URLs must not assume the production host');
   assert.match(index, /new URL\(data\._resume\.apiUrl\)/);
-  assert.match(warmup, /process\.env\.STEELENGINE_WORKFLOW_ID/);
 });
 
 test('Vercel configuration remains compatible with the Hobby plan', async () => {
@@ -34,47 +28,48 @@ test('Vercel configuration remains compatible with the Hobby plan', async () => 
 });
 
 test('server-side SteelEngine calls default to dev and support an environment override', async () => {
-  const [proxy, warmup] = await Promise.all([
-    readRepoFile('api/proxy.js'),
-    readRepoFile('api/warmup.js'),
-  ]);
+  const proxy = await readRepoFile('api/proxy.js');
 
-  for (const source of [proxy, warmup]) {
-    assert.match(source, new RegExp(TARGET_BASE_URL.replaceAll('.', '\\.')));
-    assert.match(source, /process\.env\.STEELENGINE_BASE_URL/);
-    assert.doesNotMatch(source, /https:\/\/steelengine\.com\//);
-  }
+  assert.match(proxy, new RegExp(TARGET_BASE_URL.replaceAll('.', '\\.')));
+  assert.match(proxy, /process\.env\.STEELENGINE_BASE_URL/);
+  assert.doesNotMatch(proxy, /https:\/\/steelengine\.com\//);
 });
 
-test('HITL confirmation polls the async resume job instead of the paused execution', async () => {
+test('the frontend uses direct synchronous workflow responses', async () => {
+  const index = await readRepoFile('index.html');
+  const proxy = await readRepoFile('api/proxy.js');
+
+  assert.doesNotMatch(index, /X-Execution-Mode/);
+  assert.doesNotMatch(index, /\/api\/jobs\//);
+  assert.doesNotMatch(index, /\bpoll\s*\(/);
+  assert.doesNotMatch(index, /prewarm/i);
+  assert.doesNotMatch(proxy, /X-Execution-Mode/);
+  await assert.rejects(() => readRepoFile('api/warmup.js'), { code: 'ENOENT' });
+});
+
+test('HITL confirmation renders the direct resume response', async () => {
   const index = await readRepoFile('index.html');
   const start = index.indexOf('async function doConfirm()');
-  const end = index.indexOf('async function poll(', start);
+  const end = index.indexOf('function startLoading(', start);
   const doConfirmSource = index.slice(start, end);
 
   assert.notEqual(start, -1, 'doConfirm must exist');
-  assert.notEqual(end, -1, 'poll must follow doConfirm');
+  assert.notEqual(end, -1, 'startLoading must follow doConfirm');
 
-  const polledJobIds = [];
   let renderedResult = null;
   const context = {
     S: {
       resumeUrl: '/api/proxy/resume',
-      executionId: 'paused-execution',
       candidates: [{ id: 'customer-1', name: 'Test Customer' }],
       selectedId: 'customer-1',
     },
     HDRS: { 'Content-Type': 'application/json' },
     fetch: async () => ({
       ok: true,
-      status: 202,
-      json: async () => ({ async: true, jobId: 'resume-job' }),
+      status: 200,
+      json: async () => ({ output: { data: { found: true, customer: { id: 'redacted' } } } }),
     }),
     unwrapWorkflow: (raw) => raw?.output?.data ?? raw?.data ?? raw,
-    poll: async (jobId) => {
-      polledJobIds.push(jobId);
-      return { found: true, customer: { id: 'redacted' } };
-    },
     renderSummary: (result) => { renderedResult = result; },
     startLoading: () => {},
     goTo: () => {},
@@ -83,6 +78,5 @@ test('HITL confirmation polls the async resume job instead of the paused executi
 
   await vm.runInNewContext(`${doConfirmSource}; doConfirm();`, context);
 
-  assert.deepEqual(polledJobIds, ['resume-job']);
   assert.equal(renderedResult?.found, true);
 });

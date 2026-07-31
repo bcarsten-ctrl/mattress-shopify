@@ -281,10 +281,8 @@
 const BASE  = '/api/proxy';
 const WF_ID = 'dbb28203-b201-4f61-a3bc-57d55a40f7b6';
 const HDRS  = { 'Content-Type': 'application/json' };
-const ASYNC_HDRS = { ...HDRS, 'X-Execution-Mode': 'async' };
 
-let S = { resumeUrl: null, executionId: null, candidates: [], selectedId: null };
-let warmSearchPathPromise = null;
+let S = { resumeUrl: null, candidates: [], selectedId: null };
 
 function goTo(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -367,24 +365,6 @@ function visibleOrders(rawOrders) {
   return (rawOrders || []).map(o => ({ ...o, items: productItems(o), productTotal: orderProductTotal(o) })).filter(o => o.items.length);
 }
 
-function prewarmSearchPath() {
-  if (!warmSearchPathPromise) {
-    warmSearchPathPromise = fetch(`${BASE}/api/workflows/${WF_ID}`, { headers: HDRS, cache: 'no-store' }).catch(() => null);
-  }
-  return warmSearchPathPromise;
-}
-
-async function waitForPrewarm(ms = 1200) {
-  await Promise.race([
-    prewarmSearchPath(),
-    new Promise(resolve => setTimeout(resolve, ms))
-  ]);
-}
-
-prewarmSearchPath();
-document.getElementById('nameInput')?.addEventListener('focus', prewarmSearchPath, { once: true });
-document.getElementById('nameInput')?.addEventListener('input', prewarmSearchPath, { once: true });
-
 async function doSearch() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) { document.getElementById('nameInput').focus(); return; }
@@ -395,16 +375,12 @@ async function doSearch() {
   btn.innerHTML = '<div style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.75s linear infinite;flex-shrink:0"></div> Searching…';
 
   try {
-    await waitForPrewarm();
-    const res  = await fetch(`${BASE}/api/workflows/${WF_ID}/execute`, { method:'POST', headers:ASYNC_HDRS, body:JSON.stringify({ name }) });
+    const res  = await fetch(`${BASE}/api/workflows/${WF_ID}/execute`, { method:'POST', headers:HDRS, body:JSON.stringify({ name }) });
     const raw  = await res.json();
 
     if (!res.ok) { goTo('p1'); showErr(raw?.message || raw?.error || `Error ${res.status} — please try again.`); return; }
 
-    const data = raw?.async
-      ? await poll(raw.jobId || raw.executionId, 0)
-      : unwrapWorkflow(raw);
-    if (!data) { goTo('p1'); showErr('Timed out waiting for results. Please try again.'); return; }
+    const data = unwrapWorkflow(raw);
     handleSearchResult(data, name);
   } catch (e) {
     goTo('p1');
@@ -427,7 +403,6 @@ function handleSearchResult(data, name) {
   if (data?._resume?.apiUrl) {
     const resumeUrl = new URL(data._resume.apiUrl);
     S.resumeUrl   = `${BASE}${resumeUrl.pathname}${resumeUrl.search}`;
-    S.executionId = data._resume.executionId;
     const field   = (data.inputFormat || []).find(f => f.name === 'matching_customers');
     S.candidates  = parseCandidates(field?.value || '');
     renderCandidates(S.candidates);
@@ -496,40 +471,17 @@ async function doConfirm() {
     const raw = await res.json();
     if (!res.ok) { goTo('p1'); showErr(raw?.message || `Resume error ${res.status}`); return; }
 
-    const immediate = unwrapWorkflow(raw);
-    if (immediate?.found === true || immediate?.customer) {
-      renderSummary(immediate);
+    const result = unwrapWorkflow(raw);
+    if (result?.found === true || result?.customer) {
+      renderSummary(result);
       return;
     }
 
-    const resumeJobId = raw?.jobId || (raw?.async ? raw?.executionId : null);
-    if (!resumeJobId) {
-      goTo('p1');
-      showErr('Resume was accepted, but no completion job was returned. Please try again.');
-      return;
-    }
-
-    const result = await poll(resumeJobId, 0);
-    if (result) renderSummary(result);
-    else { goTo('p1'); showErr('Timed out waiting for results. Please try again.'); }
+    goTo('p1');
+    showErr('Unexpected response after customer confirmation. Please try again.');
   } catch (e) {
     goTo('p1'); showErr('Network error: ' + e.message);
   }
-}
-
-async function poll(execId, n) {
-  if (n > 40) return null;
-  if (n > 0) await new Promise(r => setTimeout(r, 500));
-  try {
-    const res = await fetch(`${BASE}/api/jobs/${execId}`, { headers: HDRS });
-    const raw = await res.json();
-    const d   = unwrapWorkflow(raw);
-    if (d?._resume?.apiUrl || d?.found !== undefined || d?.customer) return d;
-    const st  = raw?.status || raw?.execution?.status || d?.status;
-    if (st === 'completed' || st === 'success') return d?.output ?? d?.execution?.output ?? d?.result ?? d;
-    if (st === 'failed' || st === 'error') return null;
-    return poll(execId, n + 1);
-  } catch { return poll(execId, n + 1); }
 }
 
 function startLoading(name) {
@@ -617,7 +569,7 @@ function renderSummary(d) {
 }
 
 function resetAll() {
-  S = { resumeUrl: null, executionId: null, candidates: [], selectedId: null };
+  S = { resumeUrl: null, candidates: [], selectedId: null };
   document.getElementById('nameInput').value = '';
   clearErr();
   goTo('p1');
